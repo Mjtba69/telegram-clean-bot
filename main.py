@@ -1,76 +1,51 @@
-import logging
 import os
-import datetime
 from flask import Flask, request
-from telegram import Bot, Update, constants
+from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-from telegram.ext import Defaults
-from telegram.error import TelegramError
 
-# تفعيل الـ Debug logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# اقرأ التوكن من environment
+TOKEN = os.getenv("BOT_TOKEN")
 
-TOKEN = os.getenv("BOT_TOKEN")  # خلي التوكن بمتغير البيئة
-GROUP_ID = -1000000000000       # حط هنا الـ Chat ID مالت الكروب
-
+# سوي تطبيق Flask
 app = Flask(__name__)
-bot = Bot(token=TOKEN)
 
-defaults = Defaults(parse_mode=constants.ParseMode.HTML)
-application = Application.builder().token(TOKEN).defaults(defaults).build()
+# أنشئ البوت
+application = Application.builder().token(TOKEN).build()
 
-
+# وظيفة أمر التنظيف
 async def clean_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        await update.message.reply_text("🔄 جاري حذف الرسائل القديمة...")
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
 
-        limit_sec = 3600  # افتراضي ساعة
-        if context.args:
-            try:
-                limit_sec = int(context.args[0])
-            except ValueError:
-                await update.message.reply_text("❌ رقم غير صالح.")
-                return
+    # راسل تأكيد بدء التنظيف
+    await context.bot.send_message(chat_id, "🧹 جاري حذف الرسائل القديمة...")
 
-        now = datetime.datetime.utcnow()
-        from_id = update.effective_chat.id
+    # احذف آخر 100 رسالة (ممكن تغير الرقم)
+    async for msg in context.bot.get_chat_history(chat_id, limit=100):
+        try:
+            await context.bot.delete_message(chat_id, msg.message_id)
+        except Exception as e:
+            print(f"ما انحذفت الرسالة {msg.message_id}، السبب: {e}")
+            continue
 
-        # جلب آخر 100 رسالة
-        history = await bot.get_chat_history(chat_id=from_id, limit=100)
+    # تم الحذف
+    await context.bot.send_message(chat_id, "✅ تم الحذف!")
 
-        deleted = 0
-        for msg in history:
-            msg_age = (now - msg.date).total_seconds()
-            if msg_age > limit_sec:
-                try:
-                    await bot.delete_message(chat_id=from_id, message_id=msg.message_id)
-                    deleted += 1
-                except TelegramError as e:
-                    logger.warning(f"خطأ بالحذف: {e}")
-
-        await update.message.reply_text(f"✅ تم الحذف: {deleted} رسالة")
-
-    except Exception as e:
-        logger.error(f"فشل بالحذف: {e}")
-        await update.message.reply_text("❌ فشل بالحذف")
-
-
-# أمر إختبار بسيط
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("أنا شغّال ✅")
-
-
-# ربط الأوامر
-application.add_handler(CommandHandler("start", start))
+# أضف الأمر للبوت
 application.add_handler(CommandHandler("clean_now", clean_now))
 
-
+# نقطة استقبال webhook
 @app.route(f"/{TOKEN}", methods=["POST"])
 async def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    await application.update_queue.put(update)
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    await application.process_update(update)
     return "ok", 200
+
+# مسار رئيسي للتأكد إن السيرفر شغال
+@app.route("/")
+def home():
+    return "بوت التنظيف شغّال ✅", 200
+
+# شغّل السيرفر على Render
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
