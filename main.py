@@ -79,4 +79,4 @@ if __name__ == "__main__":
 
     threading.Thread(target=run_flask).start()
     print("🚀 Bot is starting...")
-    application.run_polling(stop_signals=None)
+
