@@ -1,82 +1,76 @@
+import logging
 import os
 import datetime
 from flask import Flask, request
-from telegram import Update, Bot
-from telegram.ext import (
-    ApplicationBuilder,
-    MessageHandler,
-    CommandHandler,
-    ContextTypes,
-    filters,
+from telegram import Bot, Update, constants
+from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Defaults
+from telegram.error import TelegramError
+
+# تفعيل الـ Debug logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
 )
-import asyncio
+logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN")  # خلي التوكن بمتغير البيئة
+GROUP_ID = -1000000000000       # حط هنا الـ Chat ID مالت الكروب
+
 app = Flask(__name__)
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=TOKEN)
 
-# تخزين الرسائل
-messages = {}
+defaults = Defaults(parse_mode=constants.ParseMode.HTML)
+application = Application.builder().token(TOKEN).defaults(defaults).build()
 
-# الكود الرئيسي للتخزين
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    if msg and msg.chat.type in ['group', 'supergroup']:
-        chat_id = msg.chat_id
-        if chat_id not in messages:
-            messages[chat_id] = {}
 
-        messages[chat_id][msg.message_id] = datetime.datetime.utcnow()
-        print(f"📥 [تخزين] msg_id={msg.message_id} | chat={chat_id}")
+async def clean_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await update.message.reply_text("🔄 جاري حذف الرسائل القديمة...")
 
-# أمر الحذف الفوري
-async def clean_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    await update.message.reply_text("🧨 بدء حذف الرسائل...")
-    await clean_all(chat_id)
-    await update.message.reply_text("✅ انتهى الحذف!")
+        limit_sec = 3600  # افتراضي ساعة
+        if context.args:
+            try:
+                limit_sec = int(context.args[0])
+            except ValueError:
+                await update.message.reply_text("❌ رقم غير صالح.")
+                return
 
-# حذف كل الرسائل المخزونة
-async def clean_all(chat_id):
-    if chat_id not in messages:
-        print(f"⚠️ [تحذير] لا توجد رسائل مخزونة للكروب {chat_id}")
-        return
+        now = datetime.datetime.utcnow()
+        from_id = update.effective_chat.id
 
-    print(f"🧹 [حذف] بدء الحذف في {chat_id}")
-    for msg_id in list(messages[chat_id]):
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=msg_id)
-            print(f"✅ [تم الحذف] msg_id={msg_id} من chat={chat_id}")
-        except Exception as e:
-            print(f"❌ [فشل الحذف] msg_id={msg_id} | chat={chat_id} | السبب: {e}")
+        # جلب آخر 100 رسالة
+        history = await bot.get_chat_history(chat_id=from_id, limit=100)
 
-    messages[chat_id] = {}
-    print(f"🏁 [انتهى] تم تنظيف الكروب {chat_id}")
+        deleted = 0
+        for msg in history:
+            msg_age = (now - msg.date).total_seconds()
+            if msg_age > limit_sec:
+                try:
+                    await bot.delete_message(chat_id=from_id, message_id=msg.message_id)
+                    deleted += 1
+                except TelegramError as e:
+                    logger.warning(f"خطأ بالحذف: {e}")
 
-# ربط Webhook بفلask
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+        await update.message.reply_text(f"✅ تم الحذف: {deleted} رسالة")
+
+    except Exception as e:
+        logger.error(f"فشل بالحذف: {e}")
+        await update.message.reply_text("❌ فشل بالحذف")
+
+
+# أمر إختبار بسيط
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("أنا شغّال ✅")
+
+
+# ربط الأوامر
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("clean_now", clean_now))
+
+
+@app.route(f"/{TOKEN}", methods=["POST"])
 async def webhook():
-    data = request.get_json(force=True)
-    print(f"🌐 [Webhook] وصلك شي من Telegram")
-    await application.update_queue.put(Update.de_json(data, bot))
-    return "ok"
-
-@app.route("/", methods=["GET"])
-def home():
-    return "✅ Bot is up and running!"
-
-# إعداد البوت
-application = ApplicationBuilder().token(BOT_TOKEN).build()
-application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-application.add_handler(CommandHandler("clean_now", clean_command))
-
-# تشغيل Flask بالتوازي مع البوت
-if __name__ == "__main__":
-    import threading
-
-    def run_flask():
-        app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
-    threading.Thread(target=run_flask).start()
-    print("🚀 Bot is starting...")
-
+    update = Update.de_json(request.get_json(force=True), bot)
+    await application.update_queue.put(update)
+    return "ok", 200
