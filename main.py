@@ -51,9 +51,13 @@ dispatcher.add_handler(CommandHandler("clean_now", clean_command))
 # Webhook
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
+    data = request.get_json(force=True)
+    print("📦 وصلك شي من تلجرام:")
+    print(data)
+    update = Update.de_json(data, bot)
     dispatcher.process_update(update)
     return "ok"
+
 
 @app.route("/clean", methods=["GET"])
 def clean_route():
