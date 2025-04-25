@@ -12,7 +12,7 @@ dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 # نخزن الرسائل حسب الـ chat_id
 messages = {}
 
-# الشات آيدي الخاص بالمجموعة
+# الآيدي مال الكروب
 TARGET_CHAT_ID = -4708122757
 
 def handle_message(update: Update, context):
@@ -22,19 +22,21 @@ def handle_message(update: Update, context):
         if chat_id not in messages:
             messages[chat_id] = {}
         messages[chat_id][msg.message_id] = datetime.datetime.utcnow()
+        print(f"📥 تم تخزين الرسالة: {msg.message_id} في {chat_id}")
 
 def clean_old_messages(update=None, context=None):
     now = datetime.datetime.utcnow()
     for chat_id in list(messages):
         for msg_id in list(messages[chat_id]):
             sent_time = messages[chat_id][msg_id]
-            # للتجربة: نحذف بعد 30 ثانية، غيرها لـ 3600 للساعة
-            if (now - sent_time).total_seconds() > 30:
+            if (now - sent_time).total_seconds() > 30:  # مؤقتاً 30 ثانية للتجربة
+                print(f"🧹 محاولة حذف الرسالة {msg_id} من {chat_id}")
                 try:
                     bot.delete_message(chat_id=chat_id, message_id=msg_id)
                     messages[chat_id].pop(msg_id)
+                    print(f"✅ تم حذف الرسالة {msg_id} من {chat_id}")
                 except Exception as e:
-                    print(f"❌ Failed to delete message {msg_id} in {chat_id}: {e}")
+                    print(f"❌ فشل حذف {msg_id} من {chat_id}: {e}")
 
 def clean_command(update: Update, context):
     if update.effective_chat.id == TARGET_CHAT_ID:
@@ -42,11 +44,11 @@ def clean_command(update: Update, context):
         clean_old_messages()
         update.message.reply_text("✅ تم الحذف!")
 
-# إضافة الهاندلرات
+# هاندلرات
 dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), handle_message))
 dispatcher.add_handler(CommandHandler("clean_now", clean_command))
 
-# Webhook route
+# Webhook
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot)
@@ -56,12 +58,11 @@ def webhook():
 @app.route("/clean", methods=["GET"])
 def clean_route():
     clean_old_messages()
-    return "Manual clean done"
+    return "تم التنظيف اليدوي"
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Bot is running!"
+    return "البوت شغال 🔥"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-()
